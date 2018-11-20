@@ -24,9 +24,10 @@ class Text2ImageDataset(Dataset):
         self.dataset = None
         self.dataset_keys = None
         self.split = 'train' if split == 0 else 'valid' if split == 1 else 'test'
-        self.bboxes_df = pd.read_table('data/bounding_boxes.txt', sep=' ', header=None)
-        self.image_paths_df = pd.read_table('data/images.txt', sep='\s+|\/+', header=None)
-        self.birds_caption_path_root = './data/birds_captions/'
+        if self.dataset_type=='birds':
+            self.bboxes_df = pd.read_table('data/bounding_boxes.txt', sep=' ', header=None)
+            self.image_paths_df = pd.read_table('data/images.txt', sep='\s+|\/+', header=None)
+            self.birds_caption_path_root = './data/birds_captions/'
         self.h5py2int = lambda x: int(np.array(x))
 
     def __len__(self):
@@ -59,6 +60,9 @@ class Text2ImageDataset(Dataset):
         # example_name = self.dataset_keys[0]
         example = self.dataset[self.split][example_name]
 
+        '''
+        Prepare a right image and a wrong one
+        '''
         right_image = bytes(np.array(example['img']))
         right_embed = np.array(example['embeddings'], dtype=float)
 
@@ -98,6 +102,7 @@ class Text2ImageDataset(Dataset):
         byte_wrong_image = io.BytesIO(wrong_image)
 
         right_image = Image.open(byte_right_image)
+        right_image_original = Image.open(byte_right_image)
         wrong_image = Image.open(byte_wrong_image)
 
         if self.dataset_type == 'birds':
@@ -125,6 +130,9 @@ class Text2ImageDataset(Dataset):
 
         txt = np.array(example['txt']).astype(str)
 
+        '''
+        Prepare captions (a right and a wrong), tokenize and quantize them
+        '''
         # preprocess txt and wrong_txt
         txt = str(txt)
         txt = txt.strip()
@@ -152,26 +160,45 @@ class Text2ImageDataset(Dataset):
         wrong_caption.append(self.vocab('<end>'))
         wrong_caption = torch.Tensor(wrong_caption)
 
+        '''
+        normalize the image data
+        '''
+        right_image = torch.FloatTensor(right_image).sub_(127.5).div_(127.5)
+        wrong_image = torch.FloatTensor(wrong_image).sub_(127.5).div_(127.5)
+        right_image128 = torch.FloatTensor(right_image128).sub_(127.5).div_(127.5)
+        wrong_image128 = torch.FloatTensor(wrong_image128).sub_(127.5).div_(127.5)
+
+        '''
+        feed them into one data example
+        '''
         sample = {
-                'right_images': torch.FloatTensor(right_image),
+            # positive example
+                # unprocessed groundtruth image for analysis
+                'right_image_original': right_image_original,
+                # image matrix (64 * 64)
+                'right_images': right_image,
+                # embedding of caption using pretrained text encoder
                 'right_embed': torch.FloatTensor(right_embed),
-                'wrong_images': torch.FloatTensor(wrong_image),
+                # word-indexed caption
                 'caption': caption,
+                # text caption
                 'txt': txt,
-                'right_images128': torch.FloatTensor(right_image128),
-                'wrong_images128': torch.FloatTensor(wrong_image128),
+                # image matrix (128 * 128)
+                'right_images128': right_image128,
+            # negative example
+                'wrong_images': wrong_image,
+                'wrong_images128': wrong_image128,
                 'wrong_caption': wrong_caption
                 }
-
-        sample['right_images'] = sample['right_images'].sub_(127.5).div_(127.5)
-        sample['wrong_images'] =sample['wrong_images'].sub_(127.5).div_(127.5)
-
-        sample['right_images128'] = sample['right_images128'].sub_(127.5).div_(127.5)
-        sample['wrong_images128'] =sample['wrong_images128'].sub_(127.5).div_(127.5)
 
         return sample
 
     def find_wrong_image(self, category):
+        '''
+        Randomly pick an image not within the same category
+        :param category:
+        :return:
+        '''
         idx = np.random.randint(len(self.dataset_keys))
         example_name = self.dataset_keys[idx]
         example = self.dataset[self.split][example_name]
@@ -233,21 +260,23 @@ def collate_fn(data):
     data.sort(key=lambda x: x['caption'].size(0), reverse=True)
 
     captions = []
+    right_images_original = []
     right_images = []
     right_embeds = []
     wrong_images = []
     right_images128 = []
     wrong_images128 = []
     collate_data['txt'] = []
+
     for i in range(len(data)):
         collate_data['txt'].append(data[i]['txt'])
         captions.append(data[i]['caption'])
+        right_images_original.append(data[i]['right_image_original'])
         right_images.append(data[i]['right_images'])
         right_embeds.append(data[i]['right_embed'])
         wrong_images.append(data[i]['wrong_images'])
         right_images128.append(data[i]['right_images128'])
         wrong_images128.append(data[i]['wrong_images128'])
-         
 
     # sort and get captions, lengths, images, embeds etc
     lengths = [len(cap) for cap in captions]
@@ -257,6 +286,7 @@ def collate_fn(data):
         end = lengths[i]
         collate_data['captions'][i, :end] = cap[:end]
 
+    collate_data['right_images_original'] = right_images_original
     collate_data['right_images'] = torch.stack(right_images, 0)
     collate_data['right_embed'] = torch.stack(right_embeds, 0)
     collate_data['wrong_images'] = torch.stack(wrong_images, 0)
@@ -275,6 +305,5 @@ def collate_fn(data):
     for i, cap in enumerate(wrong_captions):
         end = wrong_lengths[i]
         collate_data['wrong_captions'][i, :end] = cap[:end]
-   
- 
+
     return collate_data

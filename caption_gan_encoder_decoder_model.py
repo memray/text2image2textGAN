@@ -6,6 +6,8 @@ from torch.autograd import Variable
 import pdb
 from tqdm import tqdm
 
+is_cuda = torch.cuda.is_available()
+
 class EncoderCNN(nn.Module):
     def __init__(self, embed_size):
         """Load the pretrained ResNet-152 and replace top fc layer."""
@@ -49,33 +51,51 @@ class DecoderRNN(nn.Module):
         super(DecoderRNN, self).__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
         self.lstm = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True)
-        self.linear = nn.Linear(hidden_size, vocab_size)
+        self.readout_layer = nn.Linear(hidden_size, vocab_size)
         self.softmax = nn.Softmax(dim=1)
         self.init_weights()
     
     def init_weights(self):
         """Initialize weights."""
         self.embed.weight.data.uniform_(-0.1, 0.1)
-        self.linear.weight.data.uniform_(-0.1, 0.1)
-        self.linear.bias.data.fill_(0)
+        self.readout_layer.weight.data.uniform_(-0.1, 0.1)
+        self.readout_layer.bias.data.fill_(0)
         
-    def forward(self, features, captions, lengths, noise=False):
-        """Decode image feature vectors and generates captions."""
-        # TODO: should not use all teacher forcing
+    def forward(self, features, captions, lengths, initialize_noise=False):
+        """
+        Decode image feature vectors and generates captions.
+        :param features: output of encoder, shape=[batch_size, hidden_dim]
+        :param captions: ground-truth of output text, for teacher forcing, shape=[batch_size, max_len]
+        :param lengths:  length of each caption sequence in the batch
+        :param initialize_noise:    whether to add noise (z) into the initial state of decoder
+        :return:
         # return: outputs (s, V), lengths list(Tmax)
+        """
+        # [batch_size, max_length, embed_dim]
         embeddings = self.embed(captions)
-        if not noise:
+        # concatenate image encoding to the beginning of embeddings as the 1st input state to decoder
+        if not initialize_noise:
+            # [batch_size, max_length+1, embed_dim]
             embeddings = torch.cat((features.unsqueeze(1), embeddings), 1)
         else:
-            max_embedding = torch.max(features[0,:]).data.numpy()[0]
-            min_embedding = torch.min(features[0,:]).data.numpy()[0]
-            concat_noise = (max_embedding - min_embedding) * torch.rand((embeddings.size(0), 1, embeddings.size(2))) + torch.FloatTensor([float(min_embedding)]).unsqueeze(0).unsqueeze(1)
-            features = torch.cat((features.unsqueeze(1), Variable(concat_noise, requires_grad=False)), 1)
+            # add a uniform noise of [min_encoding, max_encoding) to
+            max_embedding = torch.max(features).cpu() if is_cuda else torch.max(features)
+            min_embedding = torch.min(features).cpu() if is_cuda else torch.min(features)
+            # [batch_size, 1, hidden_dim]
+            noise_z = (max_embedding - min_embedding) * torch.rand(size=(embeddings.size(0), 1, embeddings.size(2))) + torch.FloatTensor([float(min_embedding)]).unsqueeze(0).unsqueeze(1)
+            noise_z = noise_z.cuda() if is_cuda else noise_z
+            # [batch_size, 2, hidden_dim]
+            features = torch.cat((features.unsqueeze(1), Variable(noise_z, requires_grad=False)), dim=1)
+            # [batch_size, max_length+2, embed_dim]...
             embeddings = torch.cat((features, embeddings), 1)
+        # seems not necessary to pack in decoding
         packed = pack_padded_sequence(embeddings, lengths, batch_first=True)
-        hiddens, _ = self.lstm(packed)
-        outputs = self.linear(hiddens[0])
-        return outputs, hiddens[1]
+        packed_hiddens, hidden_final = self.lstm(packed)
+        # [batch_size, max_len, hidden_dim]
+        hiddens, packed_lengths = pad_packed_sequence(packed_hiddens, batch_first=True)
+        # [batch_size, max_len, vocab_size]
+        logits = self.readout_layer(hiddens)
+        return logits, packed_lengths
     
     def sample(self, features, states=None):
         """Samples captions for given image features (Greedy search)."""
@@ -83,7 +103,7 @@ class DecoderRNN(nn.Module):
         inputs = features.unsqueeze(1)
         for i in range(20):                                      # maximum sampling length
             hiddens, states = self.lstm(inputs, states)          # (batch_size, 1, hidden_size), 
-            outputs = self.linear(hiddens.squeeze(1))            # (batch_size, vocab_size)
+            outputs = self.readout_layer(hiddens.squeeze(1))            # (batch_size, vocab_size)
             predicted = outputs.max(1)[1]
             # pdb.set_trace()
             # outputs = self.softmax(outputs)
@@ -116,7 +136,7 @@ class DecoderRNN(nn.Module):
             inputs = self.embed(forced_inputs[:,i])
             inputs = inputs.unsqueeze(1)                         # (batch_size, 1, embed_size)
 
-        outputs = self.linear(hiddens.squeeze(1))
+        outputs = self.readout_layer(hiddens.squeeze(1))
         outputs = self.softmax(outputs)
         predicted_indices = outputs.multinomial(best_sample_nums)
 
@@ -148,7 +168,7 @@ class DecoderRNN(nn.Module):
         for i in range(t, Tmax):                                 # maximum sampling length
             # pdb.set_trace()
             hiddens, states = self.lstm(inputs, states)          # hiddens = (b, 1, h)
-            outputs = self.linear(hiddens.squeeze(1))            # outputs = (b, V)
+            outputs = self.readout_layer(hiddens.squeeze(1))            # outputs = (b, V)
             predicted = outputs.max(1)[1]
 
             # pdb.set_trace()

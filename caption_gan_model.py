@@ -37,16 +37,17 @@ class CaptionDiscriminator(nn.Module):
 
 
 class CaptionGenerator(nn.Module):
-    def __init__(self, embed_size, hidden_size, vocab_size, num_layers):
+    def __init__(self, embed_size, hidden_size, vocab_size, num_layers, initial_noise=True):
         super(CaptionGenerator, self).__init__()
         self.encoder = EncoderCNN(embed_size)
         self.decoder = DecoderRNN(embed_size, hidden_size, vocab_size, num_layers)
         self.features = None
+        self.initial_noise = initial_noise
 
     def forward(self, images, captions, lengths):
         """Getting captions"""
-        self.features = self.encoder(images)
-        outputs, packed_lengths = self.decoder(self.features, captions, lengths, noise=False) # TODO (packed_size, vocab_size)
+        self.features = self.encoder(images) # batch_size * hidden_dim
+        outputs, packed_lengths = self.decoder(self.features, captions, lengths, initialize_noise=self.initial_noise) # TODO (packed_size, vocab_size)
         # outputs = self.decoder(self.features, captions, lengths, noise=False) # TODO (packed_size, vocab_size)
         # outputs = PackedSequence(outputs, packed_lengths)
         # outputs = pad_packed_sequence(outputs, batch_first=True) # (b, T, V)

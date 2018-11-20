@@ -1,10 +1,42 @@
+import functools
+import re
+
 import numpy as np
+import yaml
 from torch import nn
 from torch import  autograd
 import torch
 # from visualize import VisdomPlotter
 import os
 import pdb
+
+
+def replace_values(yaml_file):
+    def _get(dict, list):
+        return functools.reduce(lambda d, k: d[k], list, dict)
+
+    def _replace(obj):
+        for k, v in obj.items():
+            if isinstance(v, dict):
+                _replace(v)
+            if isinstance(v, str):
+                match = re.search(r'{{(.*?)}}', v)
+                while match:
+                    reference = match.group(1)
+                    replace = yaml_file[reference]
+                    v = re.sub(r'{{.*?}}', replace, v, count=1)
+                    match = re.search(r'{{(.*?)}}', v)
+                obj[k] = v
+
+    _replace(yaml_file)
+    return yaml_file
+
+def load_config(yaml_path='config.yaml'):
+    with open(yaml_path, 'r') as f:
+        config = yaml.load(f)
+
+    config = replace_values(config)
+    return config
 
 class Concat_embed(nn.Module):
 
@@ -18,7 +50,7 @@ class Concat_embed(nn.Module):
 
     def forward(self, inp, embed):
         projected_embed = self.projection(embed)
-        replicated_embed = projected_embed.repeat(4, 4, 1, 1).permute(2,  3, 0, 1)
+        replicated_embed = projected_embed.repeat(4, 4, 1, 1).permute(2, 3, 0, 1)
         hidden_concat = torch.cat([inp, replicated_embed], 1)
 
         return hidden_concat
@@ -82,7 +114,7 @@ class Utils(object):
         return gradient_penalty
 
     @staticmethod
-    def save_checkpoint(netD, netG, dir_path, subdir_path, epoch, inverse=False, stage = 1):
+    def save_checkpoint(netD, netG, dir_path, subdir_path, epoch, inverse=False, stage=1):
         path =  os.path.join(dir_path, subdir_path)
         if not os.path.exists(path):
             os.makedirs(path)
