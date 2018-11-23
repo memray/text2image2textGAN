@@ -8,7 +8,7 @@ from torch.autograd import Variable
 from torchvision import transforms 
 from build_vocab import Vocabulary
 # from gan_encoder_decoder_model import EncoderCNN, DecoderRNN
-from caption_gan_model import CaptionGenerator
+from caption_gan_model import Image2TextGenerator
 from PIL import Image
 import pdb
 
@@ -42,7 +42,7 @@ def main(args):
     # encoder.eval()  # evaluation mode (BN uses moving mean/variance)
     # decoder = DecoderRNN(args.embed_size, args.hidden_size, 
     #                     len(vocab), args.num_layers)
-    generator = CaptionGenerator(args.embed_size, args.hidden_size, len(vocab), args.num_layers)
+    generator = Image2TextGenerator(args.embed_size, args.hidden_size, len(vocab), args.num_layers)
     generator.encoder.eval()
     # Load the trained model parameters
     # encoder.load_state_dict(torch.load(args.encoder_path))

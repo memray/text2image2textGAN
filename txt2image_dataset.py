@@ -256,7 +256,7 @@ def collate_fn(data):
 
     collate_data = {}
 
-    # Sort a data list by caption length (descending order).
+    # Sort a data list by caption length (descending order) to accommodate pack_padded_sequence().
     data.sort(key=lambda x: x['caption'].size(0), reverse=True)
 
     captions = []
@@ -281,6 +281,7 @@ def collate_fn(data):
     # sort and get captions, lengths, images, embeds etc
     lengths = [len(cap) for cap in captions]
     collate_data['lengths'] = lengths
+    # padding, have manually ensured vocab index of <pad> is 0 in build_vocab.py
     collate_data['captions'] = torch.zeros(len(captions), max(lengths)).long()
     for i, cap in enumerate(captions):
         end = lengths[i]
@@ -293,14 +294,14 @@ def collate_fn(data):
     collate_data['right_images128'] = torch.stack(right_images128, 0)
     collate_data['wrong_images128'] = torch.stack(wrong_images128, 0)
 
-    # sort and get wrong_captions, wrong_lengths
+    # sort and get wrong_captions, wrong_lengths (in descending order)
     wrong_captions = []
-    wrong_lengths = []
     for i in range(len(data)):
          wrong_captions.append(data[i]['wrong_caption'])
     wrong_captions.sort(key=lambda x: len(x), reverse=True)
     wrong_lengths = [len(cap) for cap in wrong_captions]    
     collate_data['wrong_lengths'] = wrong_lengths
+    # padding for wrong captions
     collate_data['wrong_captions'] = torch.zeros(len(wrong_captions), max(wrong_lengths)).long()
     for i, cap in enumerate(wrong_captions):
         end = wrong_lengths[i]

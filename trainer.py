@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import pdb
 import pickle
 from build_vocab import Vocabulary 
-from caption_gan_model import CaptionDiscriminator, CaptionGenerator
+from caption_gan_model import Image2TextDiscriminator, Image2TextGenerator
 from torch.nn.utils.rnn import *
 
 is_cuda = torch.cuda.is_available()
@@ -134,21 +134,21 @@ class Trainer(object):
         self.figure_path = './figures/'
 
         if is_cuda:
-            self.caption_generator = CaptionGenerator(
+            self.caption_generator = Image2TextGenerator(
                 self.embed_size,
                 self.hidden_size,
                 len(self.vocab),
                 self.num_layers,
                 initial_noise=self.caption_initial_noise).cuda()
-            self.caption_discriminator = CaptionDiscriminator(self.embed_size, self.hidden_size, len(self.vocab), self.num_layers).cuda()
+            self.caption_discriminator = Image2TextDiscriminator(self.embed_size, self.hidden_size, len(self.vocab), self.num_layers).cuda()
         else:
-            self.caption_generator = CaptionGenerator(
+            self.caption_generator = Image2TextGenerator(
                 self.embed_size,
                 self.hidden_size,
                 len(self.vocab),
                 self.num_layers,
                 initial_noise=self.caption_initial_noise)
-            self.caption_discriminator = CaptionDiscriminator(self.embed_size, self.hidden_size, len(self.vocab), self.num_layers)
+            self.caption_discriminator = Image2TextDiscriminator(self.embed_size, self.hidden_size, len(self.vocab), self.num_layers)
 
         if pre_trained_caption_gen and os.path.exists(pre_trained_caption_gen):
             print('loaded pretrained caption generator')
@@ -167,11 +167,245 @@ class Trainer(object):
             self._train_gan(cls, interp)
         elif self.type == 'stackgan':
             self._train_stack_gan(cls, interp)
-        elif self.type == 'pretrain_caption':
-            self._pretrain_caption()
+        elif self.type == 'pretrain_txt2img':
+            self._pretrain_caption2image()
+        elif self.type == 'pretrain_img2txt':
+            self._pretrain_image2caption()
 
-    def _pretrain_caption(self):
+    def _pretrain_caption2image(self, cls, interp):
+        '''
+        Pretrain a text-encoder and an image-generator
+        :param cls:
+        :param interp:
+        :return:
+        '''
 
+        criterion = nn.BCELoss()
+        l2_loss = nn.MSELoss()
+        l1_loss = nn.L1Loss()
+        iteration = 0
+
+        # cycle gan params
+        lambda_a = 2
+        lambda_b = 2
+        mle_criterion = nn.CrossEntropyLoss()
+
+        gen_losses = []
+        disc_losses = []
+        cycle_a_losses = []
+        for epoch in tqdm(range(self.num_epochs)):
+            for sample in tqdm(self.data_loader):
+                iteration += 1
+                right_captions = sample['captions']
+                right_lengths = sample['lengths']
+                right_images = sample['right_images']  # 64x3x64x64
+                right_images128 = sample['right_images128']  # 64x3x128x128
+
+                wrong_captions = sample['wrong_captions']
+                wrong_lengths = sample['wrong_lengths']  # 64x3x64x64
+                wrong_images = sample['wrong_images']  # 64x3x64x64
+                wrong_images128 = sample['wrong_images128']  # 64x3x128x128
+
+                if is_cuda:
+                    right_images = Variable(right_images.float()).cuda()
+                    wrong_images = Variable(wrong_images.float()).cuda()
+                    right_images128 = Variable(right_images128.float()).cuda()
+                    wrong_images128 = Variable(wrong_images128.float()).cuda()
+                    right_captions = Variable(right_captions.long()).cuda()
+                else:
+                    right_images = Variable(right_images.float())
+                    wrong_images = Variable(wrong_images.float())
+                    right_images128 = Variable(right_images128.float())
+                    wrong_images128 = Variable(wrong_images128.float())
+                    right_captions = Variable(right_captions.long())
+
+                real_labels = torch.ones(right_images.size(0))
+                fake_labels = torch.zeros(right_images.size(0))
+
+                # ======== One sided label smoothing ==========
+                # Helps preventing the discriminator from overpowering the
+                # generator adding penalty when the discriminator is too confident
+                # =============================================
+                smoothed_real_labels = torch.FloatTensor(Utils.smooth_label(real_labels.numpy(), -0.1))
+
+                if is_cuda:
+                    real_labels = Variable(real_labels).cuda()
+                    smoothed_real_labels = Variable(smoothed_real_labels).cuda()
+                    fake_labels = Variable(fake_labels).cuda()
+                else:
+                    real_labels = Variable(real_labels)
+                    smoothed_real_labels = Variable(smoothed_real_labels)
+                    fake_labels = Variable(fake_labels)
+
+                # Train the discriminator
+                self.discriminator.zero_grad()
+
+                # ------------------- Training D stage 1 -------------------------------
+                outputs, activation_real = self.discriminator(right_images, right_embed)
+                real_loss = criterion(outputs, smoothed_real_labels)
+                real_score = outputs
+
+                if cls:
+                    outputs, _ = self.discriminator(wrong_images, right_embed)
+                    wrong_loss = criterion(outputs, fake_labels)
+                    wrong_score = outputs
+
+                if is_cuda:
+                    noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                else:
+                    noise = Variable(torch.randn(right_images.size(0), 100))
+                noise = noise.view(noise.size(0), 100, 1, 1)
+                fake_images = self.generator(right_embed, noise)
+                outputs, _ = self.discriminator(fake_images, right_embed)
+                fake_loss = criterion(outputs, fake_labels)
+                fake_score = outputs
+
+                if cls:
+                    d_loss = real_loss + 0.5 * wrong_loss + 0.5 * fake_loss
+                else:
+                    d_loss = real_loss + fake_loss
+
+                d_loss.backward()
+                self.optimD.step()
+
+                # -------------------- Training G stage 1 -------------------------------
+                self.generator.zero_grad()
+                self.discriminator.zero_grad()
+                if is_cuda:
+                    noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                else:
+                    noise = Variable(torch.randn(right_images.size(0), 100))
+
+                noise = noise.view(noise.size(0), 100, 1, 1)
+                fake_images = self.generator(right_embed, noise)
+                outputs, activation_fake = self.discriminator(fake_images, right_embed)
+
+                g_loss = criterion(outputs, real_labels)
+
+                if (interp):
+                    """ GAN INT loss"""
+                    available_batch_size = int(right_embed.size(0))
+                    first_part = right_embed[:int(available_batch_size / 2), :]
+                    second_part = right_embed[int(available_batch_size / 2):, :]
+                    interp_embed = (first_part + second_part) * 0.5
+
+                    if is_cuda:
+                        noise = Variable(torch.randn(int(available_batch_size / 2), 100)).cuda()
+                    else:
+                        noise = Variable(torch.randn(int(available_batch_size), 100))
+
+                    noise = noise.view(noise.size(0), 100, 1, 1)
+
+                    interp_real_labels = torch.ones(int(available_batch_size / 2))
+                    if is_cuda:
+                        interp_real_labels = Variable(interp_real_labels).cuda()
+                    else:
+                        interp_real_labels = Variable(interp_real_labels)
+
+                    fake_images = self.generator(interp_embed, noise)
+                    outputs, activation_fake = self.discriminator(fake_images, interp_embed)
+                    g_int_loss = criterion(outputs, interp_real_labels)
+                    g_loss = g_loss + 0.2 * g_int_loss
+
+                g_loss.backward()
+                self.optimG.step()
+
+                # -------------------- Training D stage 2 -------------------------------
+                self.discriminator2.zero_grad()
+                outputs = self.discriminator2(right_images128, right_embed)
+                real_loss = criterion(outputs, smoothed_real_labels)
+                real_score = outputs
+
+                if cls:
+                    outputs = self.discriminator2(wrong_images128, right_embed)
+                    wrong_loss = criterion(outputs, fake_labels)
+                    wrong_score = outputs
+
+                if is_cuda:
+                    noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                else:
+                    noise = Variable(torch.randn(right_images.size(0), 100))
+
+                noise = noise.view(noise.size(0), 100, 1, 1)
+                fake_images_v1 = self.generator(right_embed, noise)
+                fake_images_v1 = fake_images_v1.detach()
+                fake_images = self.generator2(fake_images_v1, right_embed)
+                fake_images = fake_images.detach()
+                outputs = self.discriminator2(fake_images, right_embed)
+                fake_loss = criterion(outputs, fake_labels)
+                fake_score = outputs
+
+                if cls:
+                    d_loss2 = real_loss + 0.5 * wrong_loss + 0.5 * fake_loss
+                else:
+                    d_loss2 = real_loss + fake_loss
+
+                d_loss2.backward()
+                self.optimD2.step()
+
+                # -------------------- Training G stage 2 -------------------------------
+                self.generator2.zero_grad()
+                self.discriminator2.zero_grad()
+                if is_cuda:
+                    noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                else:
+                    noise = Variable(torch.randn(right_images.size(0), 100))
+
+                noise = noise.view(noise.size(0), 100, 1, 1)
+                fake_images_v1 = self.generator(right_embed, noise)
+                fake_images_v1 = fake_images_v1.detach()
+                fake_images = self.generator2(fake_images_v1, right_embed)
+                outputs = self.discriminator2(fake_images, right_embed)
+
+                g_loss2 = criterion(outputs, real_labels)
+                g_loss2.backward()
+                self.optimG2.step()
+
+                gen_losses.append(g_loss2.data[0])
+                disc_losses.append(d_loss2.data[0])
+
+                # Generate caption with caption GAN (inverse GAN)
+                # fake_images.requires_grad = False # freeze the caption generator
+                self.caption_generator.zero_grad()
+                sampled_captions, _ = self.caption_generator.forward(fake_images, right_captions, right_lengths)
+                targets = pack_padded_sequence(right_captions, right_lengths, batch_first=True)[0]
+                loss_cycle_A = mle_criterion(sampled_captions, targets) * lambda_a
+                loss_cycle_A.backward()
+                self.optimG2.step()
+                self.optim_captionG.step()
+                cycle_a_losses.append(loss_cycle_A.data[0])
+
+            with open('gen.pkl', 'wb') as f_gen, open('disc.pkl', 'wb') as f_disc:
+                pickle.dump(gen_losses, f_gen)
+                pickle.dump(disc_losses, f_disc)
+
+            if (epoch + 1) % 10 == 0:
+                # if (epoch+1) % 5 == 0:
+                Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, self.save_path,
+                                      epoch + 1)
+                Utils.save_checkpoint(self.discriminator2, self.generator2, self.checkpoints_path, self.save_path,
+                                      epoch + 1, inverse=False, stage=2)
+                torch.save(self.caption_discriminator.state_dict(), os.path.join(self.checkpoints_path, self.save_path,
+                                                                                 'cycle_caption_disc-%d.pkl' % (
+                                                                                             epoch + 1)))
+                torch.save(self.caption_generator.state_dict(), os.path.join(self.checkpoints_path, self.save_path,
+                                                                             'cycle_caption_gen-%d.pkl' % (epoch + 1)))
+
+        # Plot pretraining figures
+        plt.plot(disc_losses, label='stage 1 disc losses')
+        plt.savefig(self.figure_path + 'stage_1_disc_losses.png')
+        plt.clf()
+
+        plt.plot(gen_losses, label='stage_1_gen_loss')
+        plt.savefig(self.figure_path + 'stage_1_gen_losses.png')
+        plt.clf()
+
+        plt.plot(disc_losses, label='cycle_a_losses')
+        plt.savefig(self.figure_path + 'cycle_a_losses.png')
+        plt.clf()
+
+
+    def _pretrain_image2caption(self):
         # Create model directory
         if not os.path.exists(self.checkpoints_path):
             os.makedirs(self.checkpoints_path)
@@ -251,26 +485,24 @@ class Trainer(object):
 
             if (epoch + 1) % 10 == 0:
                 Utils.save_checkpoint(discriminator, generator, self.checkpoints_path,
-                                      self.save_path, epoch)
-
+                                      self.save_path, epoch + 1)
 
         # Save pretrained models
         torch.save(discriminator.state_dict(),
                    os.path.join(self.checkpoints_path,
-                                'pretrained-discriminator-%d.pkl' % int(self.disc_pretrain_num_epochs)))
+                                'pretrained-img2txt-discriminator-%d.pkl' % int(self.disc_pretrain_num_epochs)))
         torch.save(generator.state_dict(),
                    os.path.join(self.checkpoints_path,
-                                'pretrained-generator-%d.pkl' % int(self.gen_pretrain_num_epochs)))
+                                'pretrained-img2txt-generator-%d.pkl' % int(self.gen_pretrain_num_epochs)))
 
         # Plot pretraining figures
         plt.plot(disc_losses, label='pretraining_caption_disc_loss')
-        plt.savefig(self.figure_path + 'pretraining_caption_disc_losses.png')
+        plt.savefig(self.figure_path + 'pretraining_img2txt_disc_losses.png')
         plt.clf()
 
         plt.plot(gen_losses, label='pretraining_gen_loss')
-        plt.savefig(self.figure_path + 'pretraining_gen_losses.png')
+        plt.savefig(self.figure_path + 'pretraining_img2txt_gen_losses.png')
         plt.clf()
-
 
 
     def _train_gan(self, cls, interp):

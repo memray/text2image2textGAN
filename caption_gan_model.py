@@ -6,16 +6,21 @@ from caption_gan_encoder_decoder_model import EncoderCNN
 from caption_gan_encoder_decoder_model import DecoderRNN
 import pdb
 
-class CaptionDiscriminator(nn.Module):
+class Image2TextDiscriminator(nn.Module):
+    """
+    Discriminate if generated texts (captions) is relevant to original images
+    """
     def __init__(self, embed_size, hidden_size, vocab_size, num_layers):
-        super(CaptionDiscriminator, self).__init__()
+        super(Image2TextDiscriminator, self).__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
         self.image_feature_encoder = EncoderCNN(embed_size)
         self.sentence_feature_encoder = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True)
         self.hidden_fine_tune_linear = nn.Linear(hidden_size, embed_size)
 
     def forward(self, images, captions, lengths):
-        """Calculate reward score: r = logistic(dot_prod(f, h))"""
+        """
+        Calculate reward score: r = logistic(dot_prod(f, h))
+        """
         # print(captions)
         features = self.image_feature_encoder(images) #(batch_size=128, embed_size=256)
 
@@ -23,6 +28,7 @@ class CaptionDiscriminator(nn.Module):
             embeddings = self.embed(captions.type(torch.cuda.LongTensor)) # (batch_size, embed_size)
         else:
             embeddings = self.embed(captions.type(torch.LongTensor)) # (batch_size, embed_size)
+
         packed = pack_padded_sequence(embeddings, lengths, batch_first=True)
         hiddens, _ = self.sentence_feature_encoder(packed)
 
@@ -36,16 +42,21 @@ class CaptionDiscriminator(nn.Module):
         return nn.Sigmoid()(dot_prod)
 
 
-class CaptionGenerator(nn.Module):
+class Image2TextGenerator(nn.Module):
+    """
+    Generate texts (captions) for a set of images
+    """
     def __init__(self, embed_size, hidden_size, vocab_size, num_layers, initial_noise=True):
-        super(CaptionGenerator, self).__init__()
+        super(Image2TextGenerator, self).__init__()
         self.encoder = EncoderCNN(embed_size)
         self.decoder = DecoderRNN(embed_size, hidden_size, vocab_size, num_layers)
         self.features = None
         self.initial_noise = initial_noise
 
     def forward(self, images, captions, lengths):
-        """Getting captions"""
+        """
+        Teacher forcing for training caption generation
+        """
         self.features = self.encoder(images) # batch_size * hidden_dim
         outputs, packed_lengths = self.decoder(self.features, captions, lengths, initialize_noise=self.initial_noise) # TODO (packed_size, vocab_size)
         # outputs = self.decoder(self.features, captions, lengths, noise=False) # TODO (packed_size, vocab_size)
@@ -56,7 +67,7 @@ class CaptionGenerator(nn.Module):
 
     def pre_compute(self, gen_samples, t):
         """
-            pre compute the most likely vocabs and their states
+        pre compute the most likely vocabs and their states
         """
         if self.features is None:
             print('must do forward before calling this function')
@@ -64,6 +75,7 @@ class CaptionGenerator(nn.Module):
 
         predicted_ids, saved_states = self.decoder.pre_compute(self.features, gen_samples, t)
         return predicted_ids, saved_states
+
 
     def rollout(self, gen_samples, t, saved_states):
         """ inputs:
@@ -82,6 +94,7 @@ class CaptionGenerator(nn.Module):
         sampled_ids = self.decoder.rollout(self.features, gen_samples, t, Tmax, states=saved_states)
         # pdb.set_trace()
         return sampled_ids
+
 
     def sample(self, images, states=None):
         features = self.encoder(images)

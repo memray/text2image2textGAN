@@ -6,7 +6,9 @@ from build_vocab import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--type", default='gan',
-                    help='GAN archiecture to use (gan | stackgan | wgan | vanilla_gan | vanilla_wgan | pretrain_caption). '
+                    help='GAN archiecture to use '
+                         '(gan | stackgan | wgan | vanilla_gan | '
+                         'vanilla_wgan | pretrain_img2txt | pretrain_txt2img). '
                          'default = gan. Vanilla mean not conditional')
 parser.add_argument("--lr", default=0.0002, type=float)
 parser.add_argument("--l1_coef", default=50, type=float)
@@ -76,7 +78,8 @@ print('is inference?: ' + str(args.inference))
 print('model type:' + str(args.type))
 
 if not args.inference and args.type!='cycle_gan':
-    print("Training gan")
+    # pretrain_img2txt or pretrain_txt2img
+    print("Training %s" % args.type)
     trainer.train(args.cls, args.interp)
 # elif not args.inference and args.type=='cycle_gan':
 #     print('cycle gan')
@@ -85,6 +88,9 @@ if not args.inference and args.type!='cycle_gan':
 #     # trainer.predict()
 #     print('cycle gan prediction')
 #     cycle_trainer.predict()
+elif not args.inference and args.type!='cycle_gan':
+    print('Training cyclegan')
+    trainer.train(args.cls, args.interp)
 elif args.inference and args.type=='gan':
     print('gan prediction')
     trainer.predict()
