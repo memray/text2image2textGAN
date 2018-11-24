@@ -1,3 +1,4 @@
+from bidir_trainer import BiDirectionalTrainer
 from trainer import Trainer
 import argparse
 from PIL import Image
@@ -5,6 +6,8 @@ import os
 from build_vocab import *
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--mode", default='bidir',
+                    help='basic (general GAN) or bidir (image <-> text)')
 parser.add_argument("--type", default='gan',
                     help='GAN archiecture to use '
                          '(gan | stackgan | wgan | vanilla_gan | '
@@ -47,32 +50,35 @@ parser.add_argument('--caption_disc_pretrain_num_epochs', default=20, type=int)
 
 args = parser.parse_args()
 
-trainer = Trainer(
-    type=args.type,
-    dataset=args.dataset,
-    split=args.split,
-    lr=args.lr,
-    diter=args.diter,
-    vis_screen=args.vis_screen,
-    save_path=args.save_path,
-    l1_coef=args.l1_coef,
-    l2_coef=args.l2_coef,
-    pre_trained_disc=args.pre_trained_disc_A,
-    pre_trained_gen=args.pre_trained_gen_A,
-    batch_size=args.batch_size,
-    num_workers=args.num_workers,
-    epochs=args.epochs,
-    pre_trained_disc_B=args.pre_trained_disc_B,
-    pre_trained_gen_B=args.pre_trained_gen_B,
-    pre_trained_caption_gen=args.pre_trained_caption_gen,
-    pre_trained_caption_disc=args.pre_trained_caption_disc,
-    caption_embed_size=args.caption_embed_size,
-    caption_hidden_size=args.caption_hidden_size,
-    caption_num_layers=args.caption_num_layers,
-    caption_gen_pretrain_num_epochs=args.caption_gen_pretrain_num_epochs,
-    caption_disc_pretrain_num_epochs=args.caption_disc_pretrain_num_epochs,
-    caption_initial_noise=False
-)
+if args.mode == 'basic':
+    trainer = Trainer(
+        type=args.type,
+        dataset=args.dataset,
+        split=args.split,
+        lr=args.lr,
+        diter=args.diter,
+        vis_screen=args.vis_screen,
+        save_path=args.save_path,
+        l1_coef=args.l1_coef,
+        l2_coef=args.l2_coef,
+        pre_trained_disc=args.pre_trained_disc_A,
+        pre_trained_gen=args.pre_trained_gen_A,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        epochs=args.epochs,
+        pre_trained_disc_B=args.pre_trained_disc_B,
+        pre_trained_gen_B=args.pre_trained_gen_B,
+        pre_trained_caption_gen=args.pre_trained_caption_gen,
+        pre_trained_caption_disc=args.pre_trained_caption_disc,
+        caption_embed_size=args.caption_embed_size,
+        caption_hidden_size=args.caption_hidden_size,
+        caption_num_layers=args.caption_num_layers,
+        caption_gen_pretrain_num_epochs=args.caption_gen_pretrain_num_epochs,
+        caption_disc_pretrain_num_epochs=args.caption_disc_pretrain_num_epochs,
+        caption_initial_noise=False
+    )
+else:
+    trainer = BiDirectionalTrainer()
 
 print('is inference?: ' + str(args.inference))
 print('model type:' + str(args.type))

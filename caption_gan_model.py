@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.nn.utils.rnn import *
-from caption_gan_encoder_decoder_model import EncoderCNN
-from caption_gan_encoder_decoder_model import DecoderRNN
+from caption_gan_encoder_decoder_model import ImageEncoder
+from caption_gan_encoder_decoder_model import TextDecoder
 import pdb
 
 class Image2TextDiscriminator(nn.Module):
@@ -13,7 +13,7 @@ class Image2TextDiscriminator(nn.Module):
     def __init__(self, embed_size, hidden_size, vocab_size, num_layers):
         super(Image2TextDiscriminator, self).__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
-        self.image_feature_encoder = EncoderCNN(embed_size)
+        self.image_feature_encoder = ImageEncoder(embed_size)
         self.sentence_feature_encoder = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True)
         self.hidden_fine_tune_linear = nn.Linear(hidden_size, embed_size)
 
@@ -46,10 +46,10 @@ class Image2TextGenerator(nn.Module):
     """
     Generate texts (captions) for a set of images
     """
-    def __init__(self, embed_size, hidden_size, vocab_size, num_layers, initial_noise=True):
+    def __init__(self, encoder_model_name, embed_size, decoder_model_name, hidden_size, vocab_size, num_layers, initial_noise=True):
         super(Image2TextGenerator, self).__init__()
-        self.encoder = EncoderCNN(embed_size)
-        self.decoder = DecoderRNN(embed_size, hidden_size, vocab_size, num_layers)
+        self.encoder = ImageEncoder(encoder_model_name, embed_size)
+        self.decoder = TextDecoder(decoder_model_name, embed_size, hidden_size, vocab_size, num_layers)
         self.features = None
         self.initial_noise = initial_noise
 
