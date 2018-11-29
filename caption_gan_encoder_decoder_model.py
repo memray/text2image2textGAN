@@ -16,7 +16,8 @@ class ImageEncoder(nn.Module):
         self.embed_size = embed_size
         if self.model_name == 'resnet50':
             self.model = models.resnet50(pretrained=True)
-            modules = list(self.model.children())[:-1]      # delete the last fc layer.
+            # excludes the final two modules (e.g., the one that does average pooling and the fully connected one)
+            modules = list(self.model.children())[:-2]
             self.vision_feature_layers = nn.Sequential(*modules)
             self.vision_feature_size = 2304
         elif self.model_name == 'alexnet':
