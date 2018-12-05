@@ -26,6 +26,16 @@ class Vocabulary(object):
             return self.word2idx['<unk>']
         return self.word2idx[word]
 
+    def decode(self, idx):
+        words = []
+        for id in idx:
+            if not id in self.idx2word:
+                words.append('<unk>')
+            else:
+                words.append(self.idx2word[id])
+
+        return words
+
     def __len__(self):
         return len(self.word2idx)
 

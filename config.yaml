@@ -33,6 +33,7 @@ test_split_path: '/home/krishna/Documents/UofT/courses/mlcv/project/datasets/cub
 
 # flowers dataset
 flowers_base_path: '/home/memray/Data/flower/'
+flowers_base_path: '/Users/memray/Data/flower/'
 flowers_images_path: '{{flowers_base_path}}/flowers_images'
 flowers_embedding_path: '{{flowers_base_path}}/flowers_icml'
 flowers_text_path: '{{flowers_base_path}}/cvpr2016_flowers/text_c10'

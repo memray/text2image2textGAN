@@ -131,9 +131,9 @@ class Text2ImageDataset(Dataset):
         txt = np.array(example['txt']).astype(str)
 
         '''
-        Prepare captions (a right and a wrong), tokenize and quantize them
+        1. Prepare captions (a right and a wrong), tokenize and quantize them
         '''
-        # preprocess txt and wrong_txt
+        # 1.1 Preprocess right txt
         txt = str(txt)
         txt = txt.strip()
         txt = txt.encode('ascii', 'ignore')
@@ -141,13 +141,39 @@ class Text2ImageDataset(Dataset):
         exclude = set(string.punctuation)
         preproc_txt = ''.join(ch for ch in txt if ch not in exclude)
         tokens = nltk.tokenize.word_tokenize(preproc_txt.lower())
+        tokens = [self.vocab(token) for token in tokens]
         caption = []
         caption.append(self.vocab('<start>'))
-        caption.extend([self.vocab(token) for token in tokens])
+        caption.extend(tokens)
         caption.append(self.vocab('<end>'))
         caption = torch.Tensor(caption)
 
+        # 1.2 Noised caption: we transform source sentences with three types of noise (from https://arxiv.org/pdf/1808.09381.pdf)
+        # 1.2.1 deleting words with probability 0.1
+        noised_tokens = np.asarray(tokens, dtype='int')
+        delete_idx = np.random.uniform(low=0.0, high=1.0, size=(len(noised_tokens))) > 0.1
+        noised_tokens = noised_tokens[delete_idx]
 
+        # 1.2.2 replacing words by a filler token with probability 0.1
+        fill_idx = np.random.uniform(low=0.0, high=1.0, size=(len(noised_tokens))) < 0.1
+        noised_tokens[fill_idx] = self.vocab('<unk>')
+
+        # 1.2.3 swapping words which is implemented as a random permutation over the tokens,
+        # drawn from the uniform distribution but restricted to swapping words no further than three positions apart.
+        permute_idx = np.random.permutation(len(noised_tokens))
+        for i, permute_i in enumerate(permute_idx):
+            # only count one direction to avoid double swap
+            if 0 < permute_i - i and permute_i - i <= 3:
+                temp = noised_tokens[i]
+                noised_tokens[i] = noised_tokens[permute_i]
+                noised_tokens[permute_i] = temp
+        noised_caption = []
+        noised_caption.append(self.vocab('<start>'))
+        noised_caption.extend(tokens)
+        noised_caption.append(self.vocab('<end>'))
+        noised_caption = torch.Tensor(noised_caption)
+
+        # 1.3 Wrong txt
         wrong_txt = wrong_txt.strip()
         wrong_txt = wrong_txt.encode('ascii', 'ignore')
         wrong_txt = wrong_txt.decode('ascii')
@@ -161,7 +187,7 @@ class Text2ImageDataset(Dataset):
         wrong_caption = torch.Tensor(wrong_caption)
 
         '''
-        normalize the image data
+        2. normalize the image data
         '''
         right_image = torch.FloatTensor(right_image).sub_(127.5).div_(127.5)
         wrong_image = torch.FloatTensor(wrong_image).sub_(127.5).div_(127.5)
@@ -169,7 +195,7 @@ class Text2ImageDataset(Dataset):
         wrong_image128 = torch.FloatTensor(wrong_image128).sub_(127.5).div_(127.5)
 
         '''
-        feed them into one data example
+        3. feed them into one data example
         '''
         sample = {
             # positive example
@@ -188,7 +214,9 @@ class Text2ImageDataset(Dataset):
             # negative example
                 'wrong_images': wrong_image,
                 'wrong_images128': wrong_image128,
-                'wrong_caption': wrong_caption
+                'wrong_caption': wrong_caption,
+            # noised example
+                'noised_caption': noised_caption
                 }
 
         return sample
@@ -294,6 +322,19 @@ def collate_fn(data):
     collate_data['right_images128'] = torch.stack(right_images128, 0)
     collate_data['wrong_images128'] = torch.stack(wrong_images128, 0)
 
+    # sort and get noised_captions, noised_lengths (in descending order)
+    noised_captions = []
+    for i in range(len(data)):
+        noised_captions.append(data[i]['noised_caption'])
+    noised_captions.sort(key=lambda x: len(x), reverse=True)
+    noised_lengths = [len(cap) for cap in noised_captions]
+    collate_data['noised_lengths'] = noised_lengths
+    # padding for noised captions
+    collate_data['noised_captions'] = torch.zeros(len(noised_captions), max(noised_lengths)).long()
+    for i, cap in enumerate(noised_captions):
+        end = noised_lengths[i]
+        collate_data['noised_captions'][i, :end] = cap[:end]
+
     # sort and get wrong_captions, wrong_lengths (in descending order)
     wrong_captions = []
     for i in range(len(data)):
@@ -306,5 +347,6 @@ def collate_fn(data):
     for i, cap in enumerate(wrong_captions):
         end = wrong_lengths[i]
         collate_data['wrong_captions'][i, :end] = cap[:end]
+
 
     return collate_data

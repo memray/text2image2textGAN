@@ -1,4 +1,4 @@
-from models import gan_cls
+from model import gan_cls
 
 class gan_factory(object):
 
@@ -15,5 +15,3 @@ class gan_factory(object):
             return gan_cls.discriminator()
         elif type == 'stage2_gan':
             return gan_cls.discriminator2()
-
-

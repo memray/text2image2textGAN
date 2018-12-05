@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
-from utils import Concat_embed
+from model.crossmodal_gan_model import Concat_embed
 import pdb
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -40,6 +40,9 @@ class ResBlock(nn.Module):
         return out
 
 class generator(nn.Module):
+    '''
+    output is (nc) x 64 x 64
+    '''
     def __init__(self):
         super(generator, self).__init__()
         self.image_size = 64
@@ -56,13 +59,14 @@ class generator(nn.Module):
             nn.LeakyReLU(negative_slope=0.2, inplace=True)
             )
 
-        # based on: https://github.com/pytorch/examples/blob/master/dcgan/main.py
+        # layers marked with * based on: https://github.com/pytorch/examples/blob/master/dcgan/main.py
         self.netG = nn.Sequential(
+            #*
             nn.ConvTranspose2d(self.latent_dim, self.ngf * 8, 4, 1, 0, bias=True),
             nn.BatchNorm2d(self.ngf * 8),
             nn.ReLU(True),
 
-            # adding extra convs will give output (ngf*8) x 4 x 4
+            #* adding extra convs will give output (ngf*8) x 4 x 4
             nn.Conv2d(self.ngf*8, self.ngf*2, 1, 1, 0),
             nn.BatchNorm2d(self.ngf*2),
             nn.ReLU(True),
@@ -75,7 +79,7 @@ class generator(nn.Module):
             nn.BatchNorm2d(self.ngf*8),
             nn.ReLU(True),
 
-            # state size. (ngf*8) x 4 x 4
+            #* state size. (ngf*8) x 4 x 4
             nn.ConvTranspose2d(self.ngf * 8, self.ngf * 4, 4, 2, 1, bias=True),
             nn.BatchNorm2d(self.ngf * 4),
             nn.ReLU(True),
@@ -94,18 +98,18 @@ class generator(nn.Module):
             nn.ReLU(True),
 
 
-            # state size. (ngf*4) x 8 x 8
+            #* state size. (ngf*4) x 8 x 8
             nn.ConvTranspose2d(self.ngf * 4, self.ngf * 2, 4, 2, 1, bias=True),
             nn.BatchNorm2d(self.ngf * 2),
             nn.ReLU(True),
-            # state size. (ngf*2) x 16 x 16
+            #* state size. (ngf*2) x 16 x 16
             nn.ConvTranspose2d(self.ngf * 2,self.ngf, 4, 2, 1, bias=True),
             nn.BatchNorm2d(self.ngf),
             nn.ReLU(True),
-            # state size. (ngf) x 32 x 32
+            #* state size. (ngf) x 32 x 32
             nn.ConvTranspose2d(self.ngf, self.num_channels, 4, 2, 1, bias=True),
             nn.Tanh()
-             # state size. (num_channels) x 64 x 64
+            # state size. (num_channels) x 64 x 64
             )
 
 
@@ -122,6 +126,9 @@ class generator(nn.Module):
         return output
 
 class discriminator(nn.Module):
+    '''
+    input is (nc) x 64 x 64
+    '''
     def __init__(self):
         super(discriminator, self).__init__()
         self.image_size = 64
@@ -133,22 +140,23 @@ class discriminator(nn.Module):
         self.C_dim = 16
 
         self.netD_1 = nn.Sequential(
-            # input is (nc) x 64 x 64
+            #* input is (nc) x 64 x 64
             nn.Conv2d(self.num_channels, self.ndf, 4, 2, 1, bias=True),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf) x 32 x 32
+            #* state size. (ndf) x 32 x 32
             nn.Conv2d(self.ndf, self.ndf * 2, 4, 2, 1, bias=True),
             nn.BatchNorm2d(self.ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
+            #* state size. (ndf*2) x 16 x 16
             nn.Conv2d(self.ndf * 2, self.ndf * 4, 4, 2, 1, bias=True),
             nn.BatchNorm2d(self.ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
+            #* state size. (ndf*4) x 8 x 8
             nn.Conv2d(self.ndf * 4, self.ndf * 8, 4, 2, 1, bias=True),
             nn.BatchNorm2d(self.ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
 
+            # below layers are different from DCGAN
             nn.Conv2d(self.ndf*8, self.ndf*2, 1, 1, 0),
             nn.BatchNorm2d(self.ndf*2),
             nn.LeakyReLU(0.2, True),
@@ -185,6 +193,9 @@ class discriminator(nn.Module):
 
 
 class generator2(nn.Module):
+    '''
+    output is (nc) x 128 x 128
+    '''
     def __init__(self):
         super(generator2, self).__init__()
         self.image_size = 128
@@ -200,7 +211,6 @@ class generator2(nn.Module):
             nn.BatchNorm1d(num_features=self.projected_embed_dim),
             nn.LeakyReLU(negative_slope=0.2, inplace=True)
         )
-
 
         # downsample
         self.netG_1 = nn.Sequential(
@@ -268,6 +278,9 @@ class generator2(nn.Module):
         return output
 
 class discriminator2(nn.Module):
+    '''
+    input is (nc) x 128 x 128
+    '''
     def __init__(self):
         super(discriminator2, self).__init__()
         self.image_size = 64
@@ -335,6 +348,12 @@ class discriminator2(nn.Module):
         self.projector = Concat_embed(self.embed_dim, self.projected_embed_dim)
 
     def forward(self, inp, embed):
+        '''
+
+        :param inp: an image of [bs, nc=3, 128, 128]
+        :param embed: an encoding in shape of [bs, self.embed_dim]
+        :return:
+        '''
         x_intermediate = self.encode_img(inp)
         x = self.projector(x_intermediate, embed)
         x_cond = self.outlogitscond(x)

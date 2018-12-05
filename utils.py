@@ -1,5 +1,6 @@
 import functools
 import re
+import shutil
 
 import numpy as np
 import yaml
@@ -9,6 +10,11 @@ import torch
 # from visualize import VisdomPlotter
 import os
 import pdb
+
+def save_checkpoint(state, is_best, filepath='checkpoint.pth.tar'):
+    torch.save(state, filepath)
+    if is_best:
+        shutil.copyfile(filepath, 'model_best.pth.tar')
 
 
 def replace_values(yaml_file):
@@ -31,29 +37,16 @@ def replace_values(yaml_file):
     _replace(yaml_file)
     return yaml_file
 
+def makedirs(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
 def load_config(yaml_path='config.yaml'):
     with open(yaml_path, 'r') as f:
         config = yaml.load(f)
 
     config = replace_values(config)
     return config
-
-class Concat_embed(nn.Module):
-
-    def __init__(self, embed_dim, projected_embed_dim):
-        super(Concat_embed, self).__init__()
-        self.projection = nn.Sequential(
-            nn.Linear(in_features=embed_dim, out_features=projected_embed_dim),
-            nn.BatchNorm1d(num_features=projected_embed_dim),
-            nn.LeakyReLU(negative_slope=0.2, inplace=True)
-            )
-
-    def forward(self, inp, embed):
-        projected_embed = self.projection(embed)
-        replicated_embed = projected_embed.repeat(4, 4, 1, 1).permute(2, 3, 0, 1)
-        hidden_concat = torch.cat([inp, replicated_embed], 1)
-
-        return hidden_concat
 
 
 class minibatch_discriminator(nn.Module):
