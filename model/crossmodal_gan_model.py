@@ -275,6 +275,8 @@ class TextDecoder(nn.Module):
         c0 = Variable(torch.zeros(
             size=(1, batch_size, self.hidden_dim)
         ), requires_grad=False)
+        if is_cuda:
+            c0 = c0.cuda()
         # h0 is initialized by source encoding
         h0 = source_encoding.unsqueeze(0)
 
@@ -293,11 +295,9 @@ class TextDecoder(nn.Module):
                 # [batch_size, 1, hidden_dim]
                 noise_z = (max_embedding - min_embedding) * torch.rand(size=(1, batch_size, self.hidden_dim)) \
                           + torch.FloatTensor([float(min_embedding)]).unsqueeze(0).unsqueeze(1)
+            if is_cuda:
+                noise_z = noise_z.cuda()
             h0 = h0 + noise_z
-
-        if is_cuda:
-            h0 = h0.cuda()
-            c0 = c0.cuda()
 
         return h0, c0
 

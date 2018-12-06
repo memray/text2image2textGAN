@@ -217,8 +217,8 @@ class BiDirectionalTrainer(object):
         text_disc_losses = []
 
         for epoch in tqdm(range(max([int(gen_pretrain_num_epochs), int(disc_pretrain_num_epochs)]))):
-            # for sample in tqdm(self.data_loader):
-            for sample in self.data_loader:
+            for sample in tqdm(self.data_loader):
+            # for sample in self.data_loader:
                 images = sample['right_images128'] # 64x3x128x128
                 captions = sample['captions'] # batch_size * max_length
                 lengths = sample['lengths'] # batch_size * 1
@@ -277,9 +277,7 @@ class BiDirectionalTrainer(object):
                     loss_disc.backward()
                     text_disc_optimizer.step()
 
-                break
-
-            if (epoch + 1) % 1 == 0:
+            if (epoch + 1) % 5 == 0:
                 print('Saving checkpoint to %s' % (os.path.join(self.checkpoints_path, 'pretrained-img2txt-%d.pkl' % (epoch + 1))))
                 utils.save_checkpoint({**self.state_to_dict(), **{'epoch': epoch}}, is_best=False,
                                       filepath=os.path.join(self.checkpoints_path, 'pretrained-img2txt-%d.pkl' % (epoch + 1)))
