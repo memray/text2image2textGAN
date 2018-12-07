@@ -206,6 +206,14 @@ class BiDirectionalTrainer(object):
         optimizer_gen = torch.optim.Adam(params_gen)
 
         # Loss and Optimizer (Disc)
+        bce_criterion = nn.BCELoss()
+        real_labels = torch.ones(self.batch_size)
+        fake_labels = torch.zeros(self.batch_size)
+
+        if is_cuda:
+            real_labels = real_labels.cuda()
+            fake_labels = fake_labels.cuda()
+
         pair_disc_optimizer = torch.optim.Adam(list(self.pair_discriminator.parameters()))
         text_disc_optimizer = torch.optim.Adam(list(self.text_discriminator.parameters()))
 
@@ -255,10 +263,10 @@ class BiDirectionalTrainer(object):
                 if epoch < int(disc_pretrain_num_epochs):
                     # pair discriminator
                     self.pair_discriminator.zero_grad()
-                    rewards_real = self.pair_discriminator(images, captions, lengths)
-                    rewards_wrong = self.pair_discriminator(images, wrong_captions, wrong_lengths)
-                    real_loss = -torch.mean(torch.log(rewards_real))
-                    wrong_loss = -torch.mean(torch.clamp(torch.log(1 - rewards_wrong), min=-1000))
+                    real_probs = self.pair_discriminator(images, captions, lengths)
+                    wrong_probs = self.pair_discriminator(images, wrong_captions, wrong_lengths)
+                    real_loss = bce_criterion(real_probs, real_labels)
+                    wrong_loss = bce_criterion(wrong_probs, fake_labels)
                     pair_loss_disc = real_loss + wrong_loss # + fake_loss, no fake_loss because this is pretraining
 
                     pair_disc_losses.append(float(pair_loss_disc.cpu().data.numpy()))
@@ -267,17 +275,19 @@ class BiDirectionalTrainer(object):
 
                     # text discriminator
                     self.text_discriminator.zero_grad()
-                    rewards_real = self.text_discriminator(captions, lengths)
-                    rewards_wrong = self.text_discriminator(noised_captions, noised_lengths)
-                    real_loss = -torch.mean(torch.log(rewards_real))
-                    wrong_loss = -torch.mean(torch.clamp(torch.log(1 - rewards_wrong), min=-1000))
+                    real_probs = self.text_discriminator(captions, lengths)
+                    wrong_probs = self.text_discriminator(noised_captions, noised_lengths)
+                    real_loss = bce_criterion(real_probs, real_labels)
+                    wrong_loss = bce_criterion(wrong_probs, fake_labels)
                     text_loss_disc = real_loss + wrong_loss # + fake_loss, no fake_loss because this is pretraining
+
+                    print(float(text_loss_disc.cpu().data.numpy()))
 
                     text_disc_losses.append(float(text_loss_disc.cpu().data.numpy()))
                     text_loss_disc.backward()
                     text_disc_optimizer.step()
 
-            if (epoch + 1) % 5 == 0:
+            if (epoch + 1) % 1 == 0:
                 # Save checkpoint
                 print('Saving checkpoint to %s' % (os.path.join(self.checkpoints_path, 'pretrained-img2txt-%d.pkl' % (epoch + 1))))
                 utils.save_checkpoint({**self.state_to_dict(), **{'epoch': epoch}}, is_best=False,
