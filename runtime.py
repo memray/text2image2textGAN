@@ -33,7 +33,7 @@ parser.add_argument('--epochs', default=55, type=int)
 parser.add_argument('--text_embed_dim', default=512, type=int)
 parser.add_argument('--text_hidden_dim', default=512, type=int)
 
-parser.add_argument("--resume", default=False, action='store_true', help='resume training by loading optimizer state')
+parser.add_argument("--resume", "-r", default=False, action='store_true', help='resume training by loading optimizer state')
 parser.add_argument('--checkpoint', default=None, type=str,
                     help='Path to checkpoint of previous trained models.')
 parser.add_argument("--image_stagegan", default=False, action='store_true', help='A multi-stage GAN for image?')

@@ -65,7 +65,7 @@ class BiDirectionalTrainer(object):
         self.l2_coef = l2_coef
 
         self.data_loader = DataLoader(self.dataset, batch_size=self.batch_size, shuffle=True,
-                                num_workers=self.num_workers, collate_fn=collate_fn)
+                                num_workers=self.num_workers, collate_fn=collate_fn, pin_memory=is_cuda)
 
         self.save_path = save_path
         self.checkpoints_path = os.path.join(self.save_path, 'checkpoints/')
@@ -207,13 +207,6 @@ class BiDirectionalTrainer(object):
 
         # Loss and Optimizer (Disc)
         bce_criterion = nn.BCELoss()
-        real_labels = torch.ones(self.batch_size)
-        fake_labels = torch.zeros(self.batch_size)
-
-        if is_cuda:
-            real_labels = real_labels.cuda()
-            fake_labels = fake_labels.cuda()
-
         pair_disc_optimizer = torch.optim.Adam(list(self.pair_discriminator.parameters()))
         text_disc_optimizer = torch.optim.Adam(list(self.text_discriminator.parameters()))
 
@@ -223,6 +216,8 @@ class BiDirectionalTrainer(object):
         gen_losses = []
         pair_disc_losses = []
         text_disc_losses = []
+
+        num_step_per_epoch = len(self.data_loader)
 
         for epoch in tqdm(range(max([int(gen_pretrain_num_epochs), int(disc_pretrain_num_epochs)]))):
             for sample in tqdm(self.data_loader):
@@ -235,14 +230,16 @@ class BiDirectionalTrainer(object):
                 wrong_captions = sample['wrong_captions'] # batch_size * max_length
                 wrong_lengths = sample['wrong_lengths'] # batch_size * 1
 
+                real_labels = torch.ones(images.size(0))
+                fake_labels = torch.zeros(images.size(0))
+
                 if is_cuda:
-                    images = Variable(images).float().cuda()
-                    captions = Variable(captions).long().cuda()
-                    wrong_captions = Variable(wrong_captions).long().cuda()
-                else:
-                    images = Variable(images).float()
-                    captions = Variable(captions).long()
-                    wrong_captions = Variable(wrong_captions).long()
+                    images = images.cuda()
+                    captions = captions.cuda()
+                    noised_captions = noised_captions.cuda()
+                    wrong_captions = wrong_captions.cuda()
+                    real_labels = real_labels.cuda()
+                    fake_labels = fake_labels.cuda()
 
                 # Train generator with teacher forcing
                 if epoch < int(gen_pretrain_num_epochs):
@@ -267,10 +264,10 @@ class BiDirectionalTrainer(object):
                     wrong_probs = self.pair_discriminator(images, wrong_captions, wrong_lengths)
                     real_loss = bce_criterion(real_probs, real_labels)
                     wrong_loss = bce_criterion(wrong_probs, fake_labels)
-                    pair_loss_disc = real_loss + wrong_loss # + fake_loss, no fake_loss because this is pretraining
+                    pair_disc_loss = real_loss + wrong_loss # + fake_loss, no fake_loss because this is pretraining
 
-                    pair_disc_losses.append(float(pair_loss_disc.cpu().data.numpy()))
-                    pair_loss_disc.backward()
+                    pair_disc_losses.append(float(pair_disc_loss.cpu().data.numpy()))
+                    pair_disc_loss.backward()
                     pair_disc_optimizer.step()
 
                     # text discriminator
@@ -279,12 +276,10 @@ class BiDirectionalTrainer(object):
                     wrong_probs = self.text_discriminator(noised_captions, noised_lengths)
                     real_loss = bce_criterion(real_probs, real_labels)
                     wrong_loss = bce_criterion(wrong_probs, fake_labels)
-                    text_loss_disc = real_loss + wrong_loss # + fake_loss, no fake_loss because this is pretraining
+                    text_disc_loss = real_loss + wrong_loss # + fake_loss, no fake_loss because this is pretraining
 
-                    print(float(text_loss_disc.cpu().data.numpy()))
-
-                    text_disc_losses.append(float(text_loss_disc.cpu().data.numpy()))
-                    text_loss_disc.backward()
+                    text_disc_losses.append(float(text_disc_loss.cpu().data.numpy()))
+                    text_disc_loss.backward()
                     text_disc_optimizer.step()
 
             if (epoch + 1) % 1 == 0:
@@ -305,20 +300,20 @@ class BiDirectionalTrainer(object):
 
                 # Save loss to file
                 with open(self.figure_path + 'pretraining_img2txt_loss.csv', 'w') as loss_csv:
-                    loss_csv.write('epoch, gen, pair_disc, text_disc\n')
-                    for epoch_i in range(max(len(gen_losses), len(pair_disc_losses), len(text_disc_losses))):
-                        line = '%s,' % str(epoch_i + 1)
-                        for loss in [gen_losses, pair_disc_losses, text_loss_disc]:
-                            if epoch_i < len(loss):
-                                line += '%.6f,' % loss[epoch_i]
+                    loss_csv.write('epoch, step, gen, pair_disc, text_disc\n')
+                    for step_i in range(max(len(gen_losses), len(pair_disc_losses), len(text_disc_losses))):
+                        line = '%d, %d, ' % (step_i / num_step_per_epoch + 1, step_i)
+                        for loss in [gen_losses, pair_disc_losses, text_disc_losses]:
+                            if step_i < len(loss):
+                                line += '%.6f, ' % loss[step_i]
                             else:
-                                line += '0.0,'
+                                line += '0.0, '
                         line += '\n'
                         loss_csv.write(line)
 
         # Save pretrained models
-        utils.save_checkpoint(self.state_to_dict(), is_best=False,
-                              filepath=os.path.join(self.checkpoints_path, 'pretrained-img2txt-%d.pkl' % (epoch + 1)))
+        utils.save_checkpoint({**self.state_to_dict(), **{'epoch': epoch}}, is_best=False,
+                              filepath=os.path.join(self.checkpoints_path, 'pretrained-img2txt-%d-final.pkl' % (epoch + 1)))
 
 
     def state_to_dict(self, names=None):
@@ -326,7 +321,11 @@ class BiDirectionalTrainer(object):
             names = ['image_encoder', 'text_encoder',
                      'image_generator64', 'image_discriminator64',
                      'image_generator128', 'image_discriminator128',
-                     'text_generator', 'text_discriminator', 'pair_discriminator']
+                     'text_generator', 'text_discriminator', 'pair_discriminator',
+                     'optimG_text', 'optimD_text',
+                     'optimG_image64', 'optimD_image64',
+                     'optimG_image128', 'optimD_image128']
+
         return {name: getattr(self, name).state_dict() for name in names}
 
     def _train_gan(self, cls, interp):
