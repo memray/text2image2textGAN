@@ -169,7 +169,7 @@ class Text2ImageDataset(Dataset):
                 noised_tokens[permute_i] = temp
         noised_caption = []
         noised_caption.append(self.vocab('<start>'))
-        noised_caption.extend(tokens)
+        noised_caption.extend(noised_tokens)
         noised_caption.append(self.vocab('<end>'))
         noised_caption = torch.Tensor(noised_caption)
 

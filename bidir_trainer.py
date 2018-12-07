@@ -217,8 +217,8 @@ class BiDirectionalTrainer(object):
         pair_disc_optimizer = torch.optim.Adam(list(self.pair_discriminator.parameters()))
         text_disc_optimizer = torch.optim.Adam(list(self.text_discriminator.parameters()))
 
-        gen_pretrain_num_epochs = 20
-        disc_pretrain_num_epochs = 20
+        gen_pretrain_num_epochs = 10
+        disc_pretrain_num_epochs = 10
 
         gen_losses = []
         pair_disc_losses = []
@@ -306,7 +306,7 @@ class BiDirectionalTrainer(object):
                 # Save loss to file
                 with open(self.figure_path + 'pretraining_img2txt_loss.csv', 'w') as loss_csv:
                     loss_csv.write('epoch, gen, pair_disc, text_disc\n')
-                    for epoch_i in range(max(len(gen_losses), len(pair_disc_losses), len(text_loss_disc))):
+                    for epoch_i in range(max(len(gen_losses), len(pair_disc_losses), len(text_disc_losses))):
                         line = '%s,' % str(epoch_i + 1)
                         for loss in [gen_losses, pair_disc_losses, text_loss_disc]:
                             if epoch_i < len(loss):
