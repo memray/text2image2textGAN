@@ -11,6 +11,16 @@ import torch
 import os
 import pdb
 
+from torch.autograd import Variable
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def add_gaussion_noise(x, sigma=0.1, cuda=False):
+    noise = Variable(torch.zeros(x.shape)).cuda() if cuda else Variable(torch.zeros(x.shape))
+    noise.data.normal_(0, std=sigma)
+    return x + noise
+
 def save_checkpoint(state, is_best, filepath='checkpoint.pth.tar'):
     torch.save(state, filepath)
     if is_best:
@@ -42,8 +52,11 @@ def makedirs(path):
         os.makedirs(path)
 
 def load_config(yaml_path='config.yaml'):
-    with open(yaml_path, 'r') as f:
-        config = yaml.load(f)
+    try:
+        with open(yaml_path, 'r') as f:
+            config = yaml.load(f)
+    except:
+        print(os.path.abspath(yaml_path))
 
     config = replace_values(config)
     return config

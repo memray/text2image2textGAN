@@ -9,12 +9,6 @@ from torchvision.models.inception import inception_v3
 import numpy as np
 from scipy.stats import entropy
 
-from tqdm import tqdm
-import pdb
-
-from dataset import Text2ImageDataset
-from eval_dataset import EvalDataset
-
 def inception_score(imgs, cuda=True, batch_size=32, resize=False, splits=1):
     """Computes the inception score of the generated images imgs
     imgs -- Torch dataset of (3xHxW) numpy images normalized in the range [-1, 1]
@@ -51,7 +45,7 @@ def inception_score(imgs, cuda=True, batch_size=32, resize=False, splits=1):
     # Get predictions
     preds = np.zeros((N, 1000))
 
-    for i, batch in tqdm(enumerate(dataloader, 0)):
+    for i, batch in enumerate(dataloader, 0):
         batch = batch.type(dtype)
         batchv = Variable(batch)
         batch_size_i = batch.size()[0]
@@ -61,8 +55,8 @@ def inception_score(imgs, cuda=True, batch_size=32, resize=False, splits=1):
     # Now compute the mean kl-div
     split_scores = []
 
-    for k in tqdm(range(splits)):
-        part = preds[k * (N // splits): (k+1) * (N // splits), :] # N/split, 1000
+    for k in range(splits):
+        part = preds[k * (N // splits): (k+1) * (N // splits), :]
         py = np.mean(part, axis=0)
         scores = []
         for i in range(part.shape[0]):
@@ -86,24 +80,15 @@ if __name__ == '__main__':
     import torchvision.datasets as dset
     import torchvision.transforms as transforms
 
-    # cifar = dset.CIFAR10(root='data/', download=True,
-    #                          transform=transforms.Compose([
-    #                              transforms.Scale(32),
-    #                              transforms.ToTensor(),
-    #                              transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    #                          ])
-    # )
-
-    # IgnoreLabelDataset(cifar)
-
-    # dataset = Text2ImageDataset(config['flowers_dataset_path'], dataset_type='flowers', vocab=self.vocab, split=split)
-    dataset = EvalDataset('./results/', transform=transforms.Compose([
+    cifar = dset.CIFAR10(root='data/', download=True,
+                             transform=transforms.Compose([
                                  transforms.Scale(32),
                                  transforms.ToTensor(),
                                  transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
                              ])
     )
+
+    IgnoreLabelDataset(cifar)
+
     print ("Calculating Inception Score...")
-
-    print (inception_score(dataset, cuda=True, batch_size=32, resize=True, splits=10))
-
+    print (inception_score(IgnoreLabelDataset(cifar), cuda=True, batch_size=32, resize=True, splits=10))

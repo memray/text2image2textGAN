@@ -8,7 +8,7 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
 import utils
-from txt2image_dataset import Text2ImageDataset, collate_fn
+from dataset import Text2ImageDataset, collate_fn
 from models.gan_factory import gan_factory
 from utils import Utils
 from PIL import Image

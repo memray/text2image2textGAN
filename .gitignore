@@ -1,7 +1,6 @@
 output/*
 pre-trained models/*
 dataset/*
-data/*
 *.pyc
 .idea/
 checkpoints/*
@@ -117,3 +116,4 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+/result/

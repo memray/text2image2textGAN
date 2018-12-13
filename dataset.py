@@ -1,5 +1,7 @@
 import os
 import io
+
+import time
 from torch.utils.data import Dataset, DataLoader
 import h5py
 import numpy as np
@@ -52,9 +54,17 @@ class Text2ImageDataset(Dataset):
 
 
     def __getitem__(self, idx):
+        '''
+        Get a data example from dataset given its ID
+        :param idx:
+        :return:
+        '''
         if self.dataset is None:
+            start_time = time.time()
             self.dataset = h5py.File(self.datasetFile, mode='r')
             self.dataset_keys = [str(k) for k in self.dataset[self.split].keys()]
+            end_time = time.time()
+            print('Initializing the dataset: %f seconds' % (end_time-start_time))
 
         example_name = self.dataset_keys[idx]
         # example_name = self.dataset_keys[0]
@@ -63,6 +73,8 @@ class Text2ImageDataset(Dataset):
         '''
         Prepare a right image and a wrong one
         '''
+        # start_time = time.time()
+
         right_image = bytes(np.array(example['img']))
         right_embed = np.array(example['embeddings'], dtype=float)
 
@@ -128,11 +140,15 @@ class Text2ImageDataset(Dataset):
         right_image128 = self.validate_image128(right_image128)
         wrong_image128 = self.validate_image128(wrong_image128)
 
-        txt = np.array(example['txt']).astype(str)
+        # end_time = time.time()
+        # print('Resize and validate images: %f seconds' % (end_time - start_time))
 
         '''
         1. Prepare captions (a right and a wrong), tokenize and quantize them
         '''
+        # start_time = time.time()
+
+        txt = np.array(example['txt']).astype(str)
         # 1.1 Preprocess right txt
         txt = str(txt)
         txt = txt.strip()
@@ -186,14 +202,21 @@ class Text2ImageDataset(Dataset):
         wrong_caption.append(self.vocab('<end>'))
         wrong_caption = torch.Tensor(wrong_caption)
 
+        # end_time = time.time()
+        # print('Generate real/fake/noised text: %f seconds' % (end_time - start_time))
+
         '''
         2. normalize the image data
         '''
+        # start_time = time.time()
+
         right_image = torch.FloatTensor(right_image).sub_(127.5).div_(127.5)
         wrong_image = torch.FloatTensor(wrong_image).sub_(127.5).div_(127.5)
         right_image128 = torch.FloatTensor(right_image128).sub_(127.5).div_(127.5)
         wrong_image128 = torch.FloatTensor(wrong_image128).sub_(127.5).div_(127.5)
 
+        # end_time = time.time()
+        # print('Normalize images: %f seconds' % (end_time - start_time))
         '''
         3. feed them into one data example
         '''
@@ -308,7 +331,7 @@ def collate_fn(data):
 
     # sort and get captions, lengths, images, embeds etc
     lengths = [len(cap) for cap in captions]
-    collate_data['lengths'] = lengths
+    collate_data['lengths'] = torch.from_numpy(np.asarray(lengths, dtype=np.int32))
     # padding, have manually ensured vocab index of <pad> is 0 in build_vocab.py
     collate_data['captions'] = torch.zeros(len(captions), max(lengths)).long()
     for i, cap in enumerate(captions):
@@ -328,7 +351,7 @@ def collate_fn(data):
         noised_captions.append(data[i]['noised_caption'])
     noised_captions.sort(key=lambda x: len(x), reverse=True)
     noised_lengths = [len(cap) for cap in noised_captions]
-    collate_data['noised_lengths'] = noised_lengths
+    collate_data['noised_lengths'] = torch.from_numpy(np.asarray(noised_lengths, dtype=np.int32))
     # padding for noised captions
     collate_data['noised_captions'] = torch.zeros(len(noised_captions), max(noised_lengths)).long()
     for i, cap in enumerate(noised_captions):
@@ -341,7 +364,7 @@ def collate_fn(data):
          wrong_captions.append(data[i]['wrong_caption'])
     wrong_captions.sort(key=lambda x: len(x), reverse=True)
     wrong_lengths = [len(cap) for cap in wrong_captions]    
-    collate_data['wrong_lengths'] = wrong_lengths
+    collate_data['wrong_lengths'] = torch.from_numpy(np.asarray(wrong_lengths, dtype=np.int32))
     # padding for wrong captions
     collate_data['wrong_captions'] = torch.zeros(len(wrong_captions), max(wrong_lengths)).long()
     for i, cap in enumerate(wrong_captions):

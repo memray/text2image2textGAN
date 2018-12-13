@@ -5,7 +5,7 @@ from torch import nn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
-from txt2image_dataset import Text2ImageDataset
+from dataset import Text2ImageDataset
 from models.gan_factory import gan_factory
 from utils import Utils, Logger
 from PIL import Image
